@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<!--
+
+-->
+<html>
+    <head>
+        <title>Single Media Test Page</title>
+        <meta charset="UTF-8">
+
+        <!-- Player -->
+        <script type="text/javascript" src="https://content.jwplatform.com/libraries/OGCpKuYD.js"></script>         
+
+        <!-- Adobe heartbeat JS -->
+        <script language="JavaScript" type="text/javascript" src="scripts/VisitorAPI.js"></script>
+        <script language="JavaScript" type="text/javascript" src="scripts/AppMeasurement.js"></script>
+        <script language="JavaScript" type="text/javascript" src="scripts/VideoHeartbeat.min.js"></script>
+
+    </head>
+    <body>
+        <div><h3>Test Adobe Heartbeat Ad and Playback Events</h3></div>
+            
+        <div id="myVideo">
+        </div>    
+        <script type="text/javaScript">
+            var lastTime = 0;
+            
+            // Player Setup
+            //
+            var config = {};
+            config.width = 640;
+            config.height = 360;
+            config.autostart = false;            
+            config.playlist = "https://cdn.jwplayer.com/v2/media/QSnjzbEd";  
+            
+            // Adobe heartbeat setup
+            // You must enter the Adobe HB tracking domain provided by Adobe
+            config.plugins = {
+               './scripts/JWHeartbeat.js' : {
+                   adobeTrackingDomain: 'TRACKING DOMAIN',
+                   channelName: 'jw test channel',
+                   channel : 'Video',
+                   debug: true,
+                   pageName : 'JW AdobeHB Test'
+               }
+            }            
+
+            // Create the Player
+            //
+            console.log(config);
+            var playerInstance = jwplayer("myVideo");
+            playerInstance.setup(config);
+
+        </script>        
+    </body>
+</html>
