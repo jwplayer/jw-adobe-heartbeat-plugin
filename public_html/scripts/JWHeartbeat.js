@@ -93,7 +93,7 @@
     
         // Flags
         //
-        var _hbInitialized = false;
+        var _sessionStarted = false;
         var _PlaySent = false;
         var _AdsPlaying = false;
 
@@ -147,7 +147,17 @@
                 log('mediaDelegate.getCurrentPlaybackTime: position ' + pos + ' state: ' + player.getState() +
                         ' Ads Playing: ' + _AdsPlaying);        
                 return pos;
-            };               
+            };  
+            mediaDelegate.getQoSObject = function() {
+                var rate = 0;
+                log('_getQosObject: Enter');
+                var quality = player.getVisualQuality(); 
+                if (quality) {
+                    rate = quality.level.bitrate;
+                }
+                var qos =  MediaHeartbeat.createQoSObject(rate, 0, 0, 0);
+                return qos;
+            }
         }
         
         // Advertising Events
@@ -157,7 +167,7 @@
                 // Replace <ADBREAK_NAME> with the AdBreak name.
                 // Replace <POSITION> with a valid position value.
                 // Replace <START_TIME> with the AdBreak start time.
-                log('adStartBreak: Send AdStartBreak');
+                log('adStartBreak: Send #trackEvent:AdStartBreak');
                 var adBreakInfo = _MediaHeartbeat.createAdBreakObject(name, pos, start);
                 _Heartbeat.trackEvent(_MediaHeartbeat.Event.AdBreakStart, adBreakInfo); 
                 _AdsPlaying = true;
@@ -178,16 +188,28 @@
             //
             player.on('playlistItem', function (info) {
                 log('playlistItem', info.item);
+                var title = 'unknown';
+                var mediaid = 'unknown';
+            
+                if (info.item.hasOwnProperty('title')) {
+                    title = info.item.title;
+                }
+                if (info.item.hasOwnProperty('mediaid')) {
+                    mediaid = info.item.mediaid;
+                } else if (data.item.hasOwnProperty('file')) {
+                    mediaid = info.item.file;
+                }                
+                
                 // Set media info information
                 // MediaHeartbeat.createMediaObject(<VIDEO_NAME>, <VIDEO_ID>, <VIDEO_LENGTH>,MediaHeartbeat.StreamType.VOD);
                 //
-                _MediaInfo = _MediaHeartbeat.createMediaObject(info.item.title, info.item.mediaid, 
+                _MediaInfo = _MediaHeartbeat.createMediaObject(title, mediaid, 
                     player.getDuration(), _MediaHeartbeat.StreamType.VOD);
                 
                 // Set standard video metadata
                 //
                 var standardVideoMetadata = {};
-                standardVideoMetadata[_MediaHeartbeat.VideoMetadataKeys.ASSET_ID] = info.item.mediaid;
+                standardVideoMetadata[_MediaHeartbeat.VideoMetadataKeys.ASSET_ID] = mediaid;
                 _MediaInfo.setValue(_MediaHeartbeat.MediaObjectKey.StandardVideoMetadata, standardVideoMetadata);
                 
                 // Note that JWP Custom Parameters are also available in the metadata object and
@@ -198,6 +220,12 @@
                 // For example, if there is a JW Custom parameter with key 'import_guid'
                 //
                 //_CustomParams.guid = metadata.import_guid;  
+
+                // Initialize play positions
+                //
+                _LastKnownPlaybackPosition = 0;
+                _LastSystemClock = 0;
+                _PlaySent = false;
                 
             });
     
@@ -208,29 +236,26 @@
         
                 log('beforePlay event, position: ', player.getPosition());
         
-                // Initialize play positions
-                //
-                _LastKnownPlaybackPosition = 0;
-                _LastSystemClock = 0;
-        
                 // Initialize the Heartbeat for this session
                 // The JW event can get called multiple times with a position of 0,
                 // but should only initialize the heartbeat session once
                 //
                 if (player.getPosition() === 0) {
                     
-                    if (!_hbInitialized) {
-                        log('Send trackSessionStart');                
-                        _hbInitialized = true;
+                    if (!_sessionStarted) {
+                        log('Send #trackSessionStart');                
+                        _sessionStarted = true;
                         
                         // Start Session, This signals the user's intent to watch video
                         // 
                         _Heartbeat.trackSessionStart(_MediaInfo, _CustomParams);
                     }
-                } else {
-                    // Position is not 0, so it's a resume
-                    //
-                    log('beforePlay: Send trackPlay()');
+                }
+                // If the current state is paused, then resend a play event
+                //
+                var state = player.getState();
+                if (state === 'paused') {
+                    log('beforePlay: Send #trackPlay()');
                     _Heartbeat.trackPlay();                           
                 }
             });
@@ -244,7 +269,7 @@
                 // play vent was sent when the AdStart event was signaled
                 // 
                 if (!_PlaySent) {
-                    log('firstFrame: Send trackPlay');                
+                    log('firstFrame: Send #trackPlay');                
                     _Heartbeat.trackPlay();        
                     _PlaySent = true;
                 }
@@ -258,43 +283,32 @@
                 _LastSystemClock = d.getTime();
                 _LastKnownPlaybackPosition = data.position;
             });
+            
+            player.on('adTime', function (data) {
+                var d = new Date();
+                _LastSystemClock = d.getTime();
+                _LastKnownPlaybackPosition = data.position;
+            });
     
             // Seeking Events
             //
             player.on('seek', function (data) {
-                log('Send SeekStart'); 
+                log('Send #trackEvent:SeekStart'); 
                 _Heartbeat.trackEvent(_MediaHeartbeat.Event.SeekStart);        
             });
 
             player.on('seeked', function (data) {
-                log('Send SeekComplete'); 
+                log('Send #trackEvent:SeekComplete'); 
                 _LastKnownPlaybackPosition = player.getPosition();  // Save last known position        
                 _Heartbeat.trackEvent(_MediaHeartbeat.Event.SeekComplete);        
             });
     
-            // Video (and ads) have completed
-            //
-            player.on('complete', function (data) {
-                log('complete');
-                
-                // If an ad was playing (POST-ROLL), send the AdBreakComplete
-                //
-                if (_AdsPlaying) {
-                    log('complete: Send AdBreakComplete');             
-                    _Heartbeat.trackEvent(_MediaHeartbeat.Event.AdBreakComplete);            
-                    _AdsPlaying = false;
-                }
-                log('Send trackComplete and trackSessionEnd');         
-                _Heartbeat.trackComplete();
-                _Heartbeat.trackSessionEnd();        
-                _hbInitialized = false;  // Will need to reinitialize for next video
-                _PlaySent = false;      // Reset.
-            });
+
     
             // User paused the video
             //
             player.on('pause', function (data) {
-                log('send trackPause'); 
+                log('send #trackPause'); 
                 _Heartbeat.trackPause();        
             });
     
@@ -305,24 +319,49 @@
             player.on('play', function (data) {
                 log('play Event'); 
                 if (_AdsPlaying) {
-                    log('play: Send AdBreakComplete');             
+                    log('play: Send #trackEvent:AdBreakComplete');             
                     _Heartbeat.trackEvent(_MediaHeartbeat.Event.AdBreakComplete);            
                     _AdsPlaying = false;
                 }
             });
             
-            // Buffer events
+            // Video (and ads) have completed
             //
+            player.on('complete', function (data) {
+                log('complete');
+                
+                // If an ad was playing (POST-ROLL), send the AdBreakComplete
+                //
+                if (_AdsPlaying) {
+                    log('complete: Send #AdBreakComplete');             
+                    _Heartbeat.trackEvent(_MediaHeartbeat.Event.AdBreakComplete);            
+                    _AdsPlaying = false;
+                }
+                log('Send #trackComplete');         
+                _Heartbeat.trackComplete();
+                log('Send #trackSessionEnd');                         
+                _Heartbeat.trackSessionEnd();        
+                _sessionStarted = false;  // Will need to reinitialize for next video
+                _PlaySent = false;      // Reset.
+            });            
+            
+            // Only send the buffer event if the session has been started
+            // We don't send one just because the player loaded and pre-buffered
+            //            
             player.on('buffer', function (data) {
-                log('Send BufferStart');
-                _Heartbeat.trackEvent(_MediaHeartbeat.Event.BufferStart);        
+                if (_sessionStarted) {
+                    log('Send #trackEvent:BufferStart');
+                    _Heartbeat.trackEvent(_MediaHeartbeat.Event.BufferStart);        
+                }
             });
             player.on('bufferFull', function (data) {
-                log('Send BufferComplete');        
-                _Heartbeat.trackEvent(_MediaHeartbeat.Event.BufferComplete);                
+                if (_sessionStarted) {                
+                    log('Send #trackEvent:BufferComplete');        
+                    _Heartbeat.trackEvent(_MediaHeartbeat.Event.BufferComplete);                
+                }
             });
             player.on('error', function (data) {
-                log('Send trackError');
+                log('Send #trackError');
                 _Heartbeat.trackError(data);
             });
 
@@ -346,7 +385,7 @@
                 
                 // Send the AdStart event
                 //
-                log('adImpression: Send AdStart');
+                log('adImpression: Send #trackEvent:AdStart');
                 _Heartbeat.trackEvent(_MediaHeartbeat.Event.AdStart, adObject, adCustomMetadata);
                 
                 // Note: The documentation says that after the first ad in a Pre-roll
@@ -355,7 +394,11 @@
                 // above in the adImpression handler, automatically kicks off the trackPlay
                 // event.  Thus, just set the gPlaySent flag to true, so it is not sent again
                 //
-                _PlaySent = true;
+                if (!_PlaySent) {
+                    _PlaySent = true;
+                    log('adImpression: Sent #trackPlay');
+                    _Heartbeat.trackPlay();                                        
+                }
             });
             
             // ad is being played.
@@ -364,7 +407,7 @@
             player.on('adPlay', function (data) {
                 log('adPlay');
                 if (!_PlaySent) {
-                    log('adPlay: Send trackPlay');            
+                    log('adPlay: Send #trackPlay');            
                     _Heartbeat.trackPlay();                    
                     _PlaySent = true;
                 }
@@ -374,15 +417,30 @@
             });
             
             player.on('adSkipped', function (data) {
-                log('adSkipped: Send Event.AdSkip');
+                log('adSkipped: Send #trackEvent:AdSkip');
                 _Heartbeat.trackEvent(_MediaHeartbeat.Event.AdSkip);        
             });
 
             player.on('adComplete', function (data) {
-                log('adComplete: Send AdComplete');
+                log('adComplete: Send #trackEvent:AdComplete');
                 _Heartbeat.trackEvent(_MediaHeartbeat.Event.AdComplete); 
             });
-        
+            player.on('adBreakEnd', function (data) {
+                log('eventHandler: adBreakEnd');
+            
+                // If an ad was playing send the AdBreakComplete
+                //
+                if (_AdsPlaying) {
+                    log('complete: Send #trackEvent:AdBreakComplete');             
+                    _Heartbeat.trackEvent(MediaHeartbeat.Event.AdBreakComplete);            
+                    _AdsPlaying = false;
+                }
+            });
+            player.on('remove', function (data) {
+                // Close the session
+                log('remove: Send #trackSessionEnd');
+                _Heartbeat.trackSessionEnd();
+            });
         }  // setupListeners  
         
         // Main code for plugin
