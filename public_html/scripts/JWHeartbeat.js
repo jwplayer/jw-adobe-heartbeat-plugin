@@ -155,9 +155,33 @@
                 if (quality) {
                     rate = quality.level.bitrate;
                 }
-                var qos =  MediaHeartbeat.createQoSObject(rate, 0, 0, 0);
+                var qos =  _MediaHeartbeat.createQoSObject(rate, 0, 0, 0);
                 return qos;
             }
+        }
+        // Create an Error string of the player error
+        //
+        function createErrorString(data) {
+            var cache = [];
+            var str = JSON.stringify(data, function(key, value) {
+                if (typeof value === 'object' && value !== null) {
+                    if (cache.indexOf(value) !== - 1) {
+                        // Duplicate reference found
+                        try {
+                            // If this value does not reference a parent it can be deduped
+                            return JSON.parse(JSON.stringify(value));
+                        } catch (error) {
+                            // discard key if value cannot be deduped
+                            return;
+                        }
+                    }
+                    // Store value in our collection
+                    cache.push(value);
+                }
+                return value;
+            });
+            cache = null; // Enable garbage collection               
+            return str;
         }
         
         // Advertising Events
@@ -177,7 +201,12 @@
                 log('adStartBreak: Ad in position ' + _AdPosition + ' starting');                                
             }
         }
-        
+        function resetSession() {
+            log('Send #trackSessionEnd');                         
+            _Heartbeat.trackSessionEnd();        
+            _sessionStarted = false;  // Will need to reinitialize for next video
+            _PlaySent = false;      // Reset.
+        }
 
         function setupListeners() {
 
@@ -196,14 +225,14 @@
                 }
                 if (info.item.hasOwnProperty('mediaid')) {
                     mediaid = info.item.mediaid;
-                } else if (data.item.hasOwnProperty('file')) {
+                } else if (info.item.hasOwnProperty('file')) {
                     mediaid = info.item.file;
                 }                
                 
                 // Set media info information
                 // MediaHeartbeat.createMediaObject(<VIDEO_NAME>, <VIDEO_ID>, <VIDEO_LENGTH>,MediaHeartbeat.StreamType.VOD);
                 //
-                _MediaInfo = _MediaHeartbeat.createMediaObject(title, mediaid, 
+                _MediaInfo = _MediaHeartbeat.createMediaObject(title, String(mediaid), 
                     player.getDuration(), _MediaHeartbeat.StreamType.VOD);
                 
                 // Set standard video metadata
@@ -333,16 +362,13 @@
                 // If an ad was playing (POST-ROLL), send the AdBreakComplete
                 //
                 if (_AdsPlaying) {
-                    log('complete: Send #AdBreakComplete');             
+                    log('complete: (POST-ROLL) Send #AdBreakComplete');             
                     _Heartbeat.trackEvent(_MediaHeartbeat.Event.AdBreakComplete);            
                     _AdsPlaying = false;
                 }
                 log('Send #trackComplete');         
                 _Heartbeat.trackComplete();
-                log('Send #trackSessionEnd');                         
-                _Heartbeat.trackSessionEnd();        
-                _sessionStarted = false;  // Will need to reinitialize for next video
-                _PlaySent = false;      // Reset.
+                resetSession();
             });            
             
             // Only send the buffer event if the session has been started
@@ -360,9 +386,66 @@
                     _Heartbeat.trackEvent(_MediaHeartbeat.Event.BufferComplete);                
                 }
             });
+            // 
+            // Error Handling
+            //
             player.on('error', function (data) {
-                log('Send #trackError');
-                _Heartbeat.trackError(data);
+                log('(error) Send #trackError');
+
+                //
+                // Send all the error data as a string
+                //
+                _Heartbeat.trackError(createErrorString(data));
+                
+                // error means the player stopped so reset the session
+                resetSession();
+            });
+            
+            // Handle a setup error.  Since the player hasn't even started to play, the
+            // code needs to send a session start, the error, then the session end
+            //
+            player.on('setupError', function (data) {
+                if (!_sessionStarted) {
+                    var config = player.getConfig();
+                    var title = 'unknown';
+                    var mediaId = 'unknown';
+                    
+                    // See if we can get the title and media ID out of the setup config
+                    //
+                    if (config.hasOwnProperty('setupConfig')) {
+                        console.log('setupConfig exists');
+                        var setupConfig = config.setupConfig;
+                        if (setupConfig.hasOwnProperty('playlist')) {
+                            console.log('playlist exists');
+                            var playlist = setupConfig.playlist;
+                            if (Array.isArray(playlist)) {
+                                console.log('playlist is array');
+                                if (playlist[0].hasOwnProperty('title')) {
+                                    title = playlist[0].title;
+                                }
+                                if (playlist[0].hasOwnProperty('mediaid')) {
+                                    mediaid = playlist[0].mediaid;
+                                }
+                            }
+                        }
+                    }
+                    // Create the info needed for the session start
+                    //
+                    var info = _MediaHeartbeat.createMediaObject(title, String(mediaId), 
+                        0, _MediaHeartbeat.StreamType.VOD);
+                
+                    // Set standard video metadata
+                    //
+                    var standardVideoMetadata = {};
+                    standardVideoMetadata[_MediaHeartbeat.VideoMetadataKeys.ASSET_ID] = String(mediaId);
+                    info.setValue(_MediaHeartbeat.MediaObjectKey.StandardVideoMetadata, standardVideoMetadata);    
+                    log('eventHandler: (setupError) Send #trackSessionStart');                                    
+                    _Heartbeat.trackSessionStart(info, {});                
+                }
+                log('eventHandler: (setupError) Send #trackError');                
+                _Heartbeat.trackError(createErrorString(data));   
+
+                resetSession();
             });
 
     
@@ -399,6 +482,9 @@
                     log('adImpression: Sent #trackPlay');
                     _Heartbeat.trackPlay();                                        
                 }
+                // Set the flag that an Ad is playing
+                //
+                _AdsPlaying = true;
             });
             
             // ad is being played.
@@ -418,7 +504,11 @@
             
             player.on('adSkipped', function (data) {
                 log('adSkipped: Send #trackEvent:AdSkip');
-                _Heartbeat.trackEvent(_MediaHeartbeat.Event.AdSkip);        
+                _Heartbeat.trackEvent(_MediaHeartbeat.Event.AdSkip); 
+                
+                // Set the flag to false so the AdBreakComplete is not sent
+                // unless a new ad starts playing
+                _AdsPlaying = false;
             });
 
             player.on('adComplete', function (data) {
@@ -431,15 +521,19 @@
                 // If an ad was playing send the AdBreakComplete
                 //
                 if (_AdsPlaying) {
-                    log('complete: Send #trackEvent:AdBreakComplete');             
-                    _Heartbeat.trackEvent(MediaHeartbeat.Event.AdBreakComplete);            
+                    log('adBreakEnd: Send #trackEvent:AdBreakComplete');             
+                    _Heartbeat.trackEvent(_MediaHeartbeat.Event.AdBreakComplete);            
                     _AdsPlaying = false;
                 }
             });
             player.on('remove', function (data) {
-                // Close the session
-                log('remove: Send #trackSessionEnd');
-                _Heartbeat.trackSessionEnd();
+                // Close the session if it's still in progress
+                if (_sessionStarted) {
+                    log('remove: session in progress. stop it');
+                    resetSession();
+                } else {
+                    log('remove: session not in progress. do nothing.');                    
+                }
             });
         }  // setupListeners  
         
