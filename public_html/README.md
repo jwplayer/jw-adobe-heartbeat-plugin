@@ -20,5 +20,9 @@ https://marketing.adobe.com/resources/help/en_US/sc/implement/appmeasure_mjs_pag
   * References AppMeasurement.js, VideoHeartbeat.min.js, VisitorAPI.js, JWHeartbeat.js
   * Creates a JW Player using a Config object that includes the JWHeartbeat plugin
     
+## LICENSE
 
+This plugin implementation is a Proof of Concept only provided 
+to show the possibilities of the JW Player and should not be taken as an 
+offer to create, edit or maintain custom integration or development.
 
