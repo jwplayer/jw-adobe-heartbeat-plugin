@@ -17,8 +17,8 @@ For an overview of configuring the Javascript Heartbeat Plugins see: https://mar
 https://marketing.adobe.com/resources/help/en_US/sc/implement/appmeasure_mjs_pagecode.html for the example code
 2. Modify VisitorAPI.js with your Adobe Credentials - See https://marketing.adobe.com/resources/help/en_US/mcvid/mcvid-setup-analytics.html
 3. Create a Web Page that: (See AdobeHeartbeatBasic.html for example)
-  1. References AppMeasurement.js, VideoHeartbeat.min.js, VisitorAPI.js, JWHeartbeat.j
-  2. Creates a JW Player using a Config object that includes the JWHeartbeat plugin
+  * References AppMeasurement.js, VideoHeartbeat.min.js, VisitorAPI.js, JWHeartbeat.js
+  * Creates a JW Player using a Config object that includes the JWHeartbeat plugin
     
 
 
