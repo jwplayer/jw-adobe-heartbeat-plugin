@@ -413,13 +413,10 @@
                     // See if we can get the title and media ID out of the setup config
                     //
                     if (config.hasOwnProperty('setupConfig')) {
-                        console.log('setupConfig exists');
                         var setupConfig = config.setupConfig;
                         if (setupConfig.hasOwnProperty('playlist')) {
-                            console.log('playlist exists');
                             var playlist = setupConfig.playlist;
                             if (Array.isArray(playlist)) {
-                                console.log('playlist is array');
                                 if (playlist[0].hasOwnProperty('title')) {
                                     title = playlist[0].title;
                                 }
