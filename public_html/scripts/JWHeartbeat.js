@@ -96,6 +96,8 @@
         var _sessionStarted = false;
         var _PlaySent = false;
         var _AdsPlaying = false;
+        var _IsPlaying = false;
+        var _IsBuffering = false;
 
         // Media Heartbeat variables
         //
@@ -206,6 +208,8 @@
             _Heartbeat.trackSessionEnd();        
             _sessionStarted = false;  // Will need to reinitialize for next video
             _PlaySent = false;      // Reset.
+            _IsPlaying = false;
+            _IsBuffering = false;
         }
 
         function setupListeners() {
@@ -285,7 +289,8 @@
                 var state = player.getState();
                 if (state === 'paused') {
                     log('beforePlay: Send #trackPlay()');
-                    _Heartbeat.trackPlay();                           
+                    _Heartbeat.trackPlay();  
+                    _IsPlaying = true;
                 }
             });
     
@@ -302,6 +307,7 @@
                     _Heartbeat.trackPlay();        
                     _PlaySent = true;
                 }
+                _IsPlaying = true;                
             });
             
             // Save the current system clock, and current playback position being
@@ -323,13 +329,15 @@
             //
             player.on('seek', function (data) {
                 log('Send #trackEvent:SeekStart'); 
-                _Heartbeat.trackEvent(_MediaHeartbeat.Event.SeekStart);        
+                _Heartbeat.trackEvent(_MediaHeartbeat.Event.SeekStart); 
+                _IsPlaying = false;
             });
 
             player.on('seeked', function (data) {
                 log('Send #trackEvent:SeekComplete'); 
                 _LastKnownPlaybackPosition = player.getPosition();  // Save last known position        
                 _Heartbeat.trackEvent(_MediaHeartbeat.Event.SeekComplete);        
+                _IsPlaying = true;
             });
     
 
@@ -338,7 +346,8 @@
             //
             player.on('pause', function (data) {
                 log('send #trackPause'); 
-                _Heartbeat.trackPause();        
+                _Heartbeat.trackPause();     
+                _IsPlaying = false;
             });
     
             // If the play event is fired and ads were playing,
@@ -371,19 +380,23 @@
                 resetSession();
             });            
             
-            // Only send the buffer event if the session has been started
-            // We don't send one just because the player loaded and pre-buffered
+            // Only send the buffer event if the player is actually playing video
+            // We don't send one just because the player loaded and pre-buffered or seeked
             //            
             player.on('buffer', function (data) {
-                if (_sessionStarted) {
+                log('buffer: Player State ' + player.getState());
+                if (_IsPlaying) {
                     log('Send #trackEvent:BufferStart');
                     _Heartbeat.trackEvent(_MediaHeartbeat.Event.BufferStart);        
+                    _IsBuffering = true;
                 }
             });
             player.on('bufferFull', function (data) {
-                if (_sessionStarted) {                
+                log('bufferFull: Player State ' + player.getState());                
+                if (_IsBuffering) {                
                     log('Send #trackEvent:BufferComplete');        
                     _Heartbeat.trackEvent(_MediaHeartbeat.Event.BufferComplete);                
+                    _IsBuffering = false;
                 }
             });
             // 
